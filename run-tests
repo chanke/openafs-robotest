@@ -1,0 +1,110 @@
+#!/bin/bash
+# Copyright (c) 2014, Sine Nomine Associates
+#
+# Permission to use, copy, modify, and/or distribute this software for any
+# purpose with or without fee is hereby granted, provided that the above
+# copyright notice and this permission notice appear in all copies.
+#
+# THE SOFTWARE IS PROVIDED 'AS IS' AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+# WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+# ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+# WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+# ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+# OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+#------------------------------------------------------------------------------
+#
+# WARNING: This program destroys all of the AFS data on the local system.
+#          RUN THIS PROGRAM ON TEST SYSTEMS ONLY!
+#
+#------------------------------------------------------------------------------
+set -e  # exit on error
+
+SETTINGS="site/local/settings.py"
+test -f "$SETTINGS" && source "$SETTINGS"
+
+usage() {
+    echo "usage: run-tests [<stage>...]"
+    echo "       run-tests --reset"
+}
+
+#------------------------------------------------------------------------------
+# Run the test suite
+#
+# Run the test suite, stopping if one of the sub-suites fails, since later
+# suites depend on actions of the predecessors. This avoids generating a report
+# and log filled with false errors. (RF does not have built in notion of
+# "skipped" tests.)
+#
+run_tests() {
+
+    STAGES="${@-precheck install remove}"
+
+    mkdir -p results   # create the test output directory, if needed
+    rm -f results/*    # clean up last results, if any
+
+    NUM=0
+    for STAGE in $STAGES
+    do
+        echo "Running test $STAGE ..."
+        NUM=$(printf "%03d\n" $((NUM + 1)))
+        pybot \
+          --outputdir results \
+          --output "$NUM-$STAGE.xml" \
+          --log "$NUM-$STAGE.html" \
+          --report NONE \
+          --variablefile "$SETTINGS" \
+          --suite "$STAGE" \
+          tests || { RESULT="failed"; break; }
+    done
+
+    echo "Generating report ..."
+    rm -f results/*.html    # clean up intermediate logs
+    rebot \
+      --outputdir results \
+      --output openafs.xml \
+      --log openafs-log.html \
+      --report openafs.html \
+      --reportbackground white:white:white \
+      --name openafs \
+      results/*.xml
+
+    if test "$RESULT" = "failed"; then
+       exit 1
+    fi
+    echo "All tests passed."
+}
+
+#------------------------------------------------------------------------------
+# Unconditionally destroy the local test cell.
+#
+# WARNING: This destroys all the local AFS data.
+#
+run_reset() {
+    if [ $UID -ne 0 ]; then
+        echo "Must run as root." >&2
+        exit 1
+    fi
+
+    # Transarc-style paths
+    if test -d /afs; then
+        rmdir /afs || echo "run teardown: unable to remove /afs"
+    fi
+    for DIR in /usr/afs /usr/afsws /usr/vice/etc; do
+        if test -d $DIR; then
+            rm -rf "$DIR" || echo "run teardown: unable to remove $DIR"
+        fi
+    done
+}
+
+#------------------------------------------------------------------------------
+# main
+case "$1" in
+   --reset)
+       run_reset
+       ;;
+   *)
+       run_tests "$@"
+       ;;
+esac
+
