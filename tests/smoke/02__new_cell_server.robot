@@ -39,6 +39,9 @@ cell naming
     when set cell name    ${AFS_CELL}
     then cell name is    ${AFS_CELL}
 
+client configuration
+    set client configuration
+
 protection database creation
     given protection server is not running
     when create protection server
