@@ -1,295 +1,120 @@
-OpenAFS RoboTest
-================
+# OpenAFS RoboTest
 
-This is a Robot Framework (RF) based test suite for OpenAFS. This initial
-version is a limited, basic smoke test of a single host OpenAFS server and
-client.  This test will install the OpenAFS client and server binaries and
-setup a simple test cell.  The following files are needed to run the test:
+OpenAFS RoboTest is a [Robot Framework][1] based test suite for OpenAFS. This
+initial version is a limited test suite for an OpenAFS server and client on a
+single test system.  RoboTest will install the OpenAFS binaries, setup a simple
+test cell, then run a series of basic tests.  A test feature of OpenAFS is used
+to mimic a Kerberos server, allowing the tests to be run without the need to
+setup a Kerberos realm and create keytabs.
 
-* OpenAFS RPM (or dest-style binary) files
-* Kerberos keytab files containing the AFS service key(s) and user keys
+[1]: http://robotframework.org/
 
-The results of the tests are a set of html files indicating pass or fail
-status.
+*Requirements*
 
-
-System Requirements
-===================
-
-* a Kerberos 5 realm
-* RHEL/CentOS 6 Linux
+* Linux or Solaris
 * Python 2.6.x
-* Robot Framework 2.7+
-* Kerberos client utilities (kinit, kdestroy, klist, kvno)
-* Clock synchronization (required by Kerberos)
+* Robot Framework 2.7 or better
+* OpenAFS installation packages or binaries built from source
 
+## Installation
 
-Kerberos Setup
-==============
+This test harness is designed to be run on a dedicated test system.
+Typically you will want to setup a virtual machine to run the
+tests.
 
-A working Kerberos 5 realm is required. This test harness has been developed
-with MIT Kerberos, but other implementations (Active Directory, Heimdal) should
-work as well.  If a realm is not available for testing, a test KDC server may
-be installed directly on the system under test. See one of the many Kerberos
-installation guides available.
+Robot Framework can be installed using the Python `pip` command.  (See
+http://robotframework.org/ for more details.)
 
-A Kerberos administrator must create following keytab files:
+    $ sudo pip install robotframework
 
- * rxkad.keytab     - AFS service key(s), not DES
- * afs.keytab       - AFS service key, DES (for testing old versions)
- * robotest.keytab  - test user keys
-
-The 'rxkad.keytab' should contain one or more non-DES keys for the service
-principal
-
-    afs/<cellname>@<REALM>
-
-where <cellname> is the name of the test cell to be created by the test suite
-and <REALM> is the name of the test realm.
-
-The 'afs.keytab' is required to test older OpenAFS versions which only support
-DES, otherwise it is not needed. As of OpenAFS 1.6.5 (1.4.15), DES service keys
-are deprecated.  The name of the service principal should be,
-
-    afs/<another.cellname>@<REALM>
-
-where <another.cellname> is the name of the test cell to be created by the test
-suite, and should be a different name than the <cellname> used for the service
-keys in the rxkad.keyfile.  The key should be single DES, with the afs3 salt,
-or v4 salt, that is enctype 'des-cbc-crc:afs3'.
-
-The 'robotest.keytab' should contain the keys for an AFS administrative user
-and a regular user. The principals should be named:
-
-    robotest/admin@<REALM>
-    robotest@<REALM>
-
-Edit the openafs-robotest config.py file if different user names are chosen.
-
-
-See "Appendix A: Creating Keytabs, MIT Kerberos 5" for commands to create the
-principals and keytab files.
-
-
-RHEL/CentOS Setup
-=================
-
-1. Setup the EPEL package repository.
-
-Required python packages are available in the EPEL yum repository. Check
-the available repositories with the command:
-
-    $ yum repolist
-
-If the 'epel' repository is not listed, then configure yum to use the EPEL
-repository. See http://fedoraproject.org/wiki/EPEL for information about the
-EPEL repository.
-
-
-2. Install and time server to keep the system clock in sync.
-
-An accurate system clock is required for Kerberos operation, as well as
-meaningful test result logs. If a mechanism is not already in place to
-synchronize the system clock, then install and start the NTP time service.
-
-Run the following commands to install the NTP time service:
-
-     $ sudo yum -y install ntp ntpdate
-     $ sudo chkconfig ntpd on
-     $ sudo ntpdate pool.ntp.org
-     $ sudo service ntpd start
-
-
-3. Install the Kerberos client programs.
-
-     $ sudo yum -y install krb5-workstation
-
-Configure the /etc/krb5.conf for the test realm to be used.
-For example, if DNS records are not used for the test realm:
-
-    [libdefaults]
-        default_realm = <REALM>
-        dns_lookup_realm = false
-        dns_lookup_kdc = false
-
-        # required for OpenAFS, before v1.6.5
-        allow_weak_crypto = true
-
-    [realms]
-        LOCALREALM = {
-            kdc = <hostname>
-            admin_server = <hostname>
-        }
-
-where <REALM> is the name of the test realm, and <hostname> is
-the hostname of the KDC.
-
-
-4. Install python packages.
-
-Install the python package installer and docutils packages.
-
-     $ sudo yum -y install python-pip python-docutils
-
-
-5. Install Robot framework (global)
-
-Use the python pip installer to install the Robot Framework.
-
-     $ sudo pip install robotframework
-
-     $ pybot --version
-     Robot Framework 2.8.1 (Python 2.6.6 on linux2)
-
-
-6. Setup a regular user to run the tests.
-
-The test suite is designed to be run under a regular user account. This user
-should have limited sudo access in order to complete the installation portion
-of the test suite.
-
-Any valid username can be used.  In the following example instructions, the
-user is called 'robotest'.
-
-    $ sudo useradd --create-home robotest
-
-Add the following to the end of the sudoers file.
-
-    $ sudo visudo
-
-    # OpenAFS test automation
-    Cmnd_Alias AFSINSTALL = /bin/rpm, /sbin/service, \
-                            /bin/cp * /usr/afs/etc/*, /bin/cp * /usr/vice/etc/*, \
-                            /usr/sbin/asetkey
-    Cmnd_Alias AFSADMIN = /usr/bin/bos, /usr/sbin/vos, /usr/bin/pts
-    robotest ALL = (root) NOPASSWD: AFSINSTALL, AFSADMIN
-
-
-7. Create a directory to display the test results.
-
-Create a directory to display the test results which is writable by the
-robotest user and is readable by a web server.  For example:
-
-    $ sudo mkdir /var/www/html/robotest
-    $ sudo chown robotest /var/www/html/robotest
-
-After a test is run, the results should then be available under;
-
-    http://<hostname>/robotest/
-
-
-8. OpenAFS RPM files.
-
-Create or find a location for the OpenAFS RPM files.  The RPM files can be
-located in a local directory, a network directory (but not AFS), or served over
-http (or ftp).
-
-9. File server data partition
-
-Create at least one disk partition and mount it as /vicepa for the test fileserver.
-
-Alternatively, create a directory called /vicepa and a file in it called
-AlwaysAttach.
-
-    $ sudo mkdir /vicepa
-    $ sudo touch /vicepa/AlwaysAttach
-
-
-Installation
-============
-
-This installation is to be performed under the regular user
-account which is to run the tests.  Root access is not required.
-
-
-1. Login as the 'robotest' user.
-
-    $ sudo su - robotest
-
-
-2. [Optional] Install of Robot Framework (local)
-
-3. Install openafs-robotest.
+Clone OpenAFS RoboTest to a directory of your choice:
 
     $ git clone https://github.com/openafs-contrib/openafs-robotest.git
     $ cd openafs-robotest
 
-4. Install the keytab files.
+The test harness should be run as a normal user, but the installation and
+removal of OpenAFS requires root access. All commands within the test harness
+that require root access use sudo to invoke a wrapper script. This script
+permits only commands needed to install, setup, and then remove OpenAFS.
 
-If the keytab files have already been created by the Kerberos administrator,
-copy them into the 'keytabs' directory.  Alternatively, if you have a Kerberos
-principal with administrative privileges, then run kadmin directly in the
-'keytabs' directory.
+First, install the wrapper script to '/usr/sbin':
 
-See "Appendix A: Creating Keytabs, MIT Kerberos 5" for commands to create the
-principals and keytab files.
+    $ sudo cp tools/afs-robotest-sudo /usr/sbin/
+
+Next, using `sudo visudo`, add the following line to your sudoers configuration:
+
+    ALL ALL = (root) NOPASSWD: /usr/sbin/afs-robotest-sudo
+
+## Setup
+
+A console based setup tool is provided to assist in setting up the
+test harness.
+
+    $ tools/afs-robotest-setup
+    OpenAFS RoboTest Setup
+    Type help for information.
+    
+    (setup) help
+    Commands. Type help <command> for syntax
+    ============================================================
+    call      Execute commands in a file.
+    genkey    Add a kerberos principal then write the keys to a keytab file.
+    getrpms   Download RPM files.
+    help      Display command help.
+    list      List setting names and values.
+    makepart  Create a fake fileserver partition.
+    quit      Quit this program.
+    reset     Reset all settings to default values.
+    set       Assign a setting value.
+    shell     Run a command using the shell.
+
+The `makepart` command will create "pseudo" partitions for the file server
+(that is, directories in the root filesystem, with the "AlwaysAttach" file
+present.)
+
+    (setup) makepart a
+
+Set the `AFS_DIST` variable to select the distribution type to be tested.  The
+distribution types currently supported are:
+
+* `rhel6`    -- RHEL6/Centos6 rpm installation
+* `suse`     -- OpenSUSE rpm installation
+* `transarc` -- legacy mode installation
+
+Set the `AFS_DIST` variable using the set subcommand:
+
+    (setup) set AFS_DIST <type>
+
+For the `rhel6` or `suse` types, use the `genrpms` command to download rpm
+files from OpenAFS.org, or set the following variables to specify the packages
+to be installed when the test harness runs:
+
+    (setup) set RPM_PACKAGE_DIR  <path-to-rpm-files>
+    (setup) set RPM_AFSRELEASE   <rpm-release>
+    (setup) set RPM_AFSVERSION   <open-afs-version>
+
+To configure RoboTest to use traditional Transarc-style binaries, set
+`AFS_DIST` to `transarc` and then set the path to the Transarc-style `dist`
+directory.
+
+    (setup) set TRANSARC_DEST  <path-to-dest-directory>
+
+## Running Tests
+
+To run the tests:
+
+    $ tools/afs-robotest-run
 
 
-5. [Optional] Configure openafs-robotest.
+## Viewing Test Results
 
-Copy the example settings file and set specific values for your
-site.
+The test results are saved in the `output` directory by default. (See the
+`RF_OUTPUT` setting.)
 
-    $ cp settings.example settings
-    $ settings
+To view the test report and log, setup a webserver to serve the files in the
+`output` directory, or use the built-in webserver tool provided by RoboTest.
 
-The settings file may be used to specify arguments commonly needed for the
-run-tests.sh front-end script.  Command line arguments given to run-tests.sh
-override the values in the settings file, if present.
+    $ tools/afs-robotest-webserver
 
-
-Running Tests
-=============
-
-1. Login as the 'robotest' user.
-
-    $ sudo su - robotest
-
-2. Change to the openafs-robotest directory.
-
-    $ cd sna-openafs-robotest
-
-3. Run the tests.
-
-    $ ./run-tests.sh <options>
-
-See ./run-tests.sh --help for a list of options.
-
-Example:
-
-    $ ./run-test.sh --afsversion 1.6.5
-
-
-Publishing Results
-==================
- 
-To see the actual test-results, setup a webserver as explained above.
-Also, you can just run tools/webserver.py.
-The results are then available under http://<hostname>:8000
-
-
-Appendix A: Creating Keytabs, MIT Kerberos 5
-============================================
-
-Use kadmin to create the principals and keytab files.
-
-Example:
-
-    $ kadmin -r <REALM> -p <principal>
-    (enter admin's password)
-
-    kadmin: addprinc -randkey robotest
-    kadmin: addprinc -randkey robotest/admin
-    kadmin: addprinc -randkey afs/robotest
-    kadmin: addprinc -randkey afs/robotest.des
-
-    kadmin: ktadd -k robotest.keytab robotest
-    kadmin: ktadd -k robotest.keytab robotest/admin
-    kadmin: ktadd -k rxkad.keytab -e aes256-cts-hmac-sha1-96:normal afs/robotest
-    kadmin: ktadd -k afs.keytab -e des-cbc-crc:afs3 afs/robotest.des
-
-    kadmin: quit
-
-Where <REALM> is the name of the test realm, and <principal> is a principal
-with Kerberos admin privileges.
+The results are then available under http://yourhostname:8000/.
 
